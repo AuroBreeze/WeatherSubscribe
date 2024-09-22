@@ -4,11 +4,20 @@ import pandas as pd
 import re
 import aiohttp
 import sqlite3
+from datetime import datetime
 
 
-from app.config import owner_id
 from app.api import *
 from app.switch import load_switch, save_switch
+from app.config import *
+
+bool_1 = True
+bool_2 = False
+json_data={
+    "city_code": [],
+    "QQ_number": []
+}
+
 
 # 数据存储路径，实际开发时，请将Example替换为具体的数据存放路径
 DATA_DIR = os.path.join(
@@ -80,6 +89,67 @@ def delete_people_from_db(group_id,user_id):
     # 关闭Connection
     conn.close()
 
+def find_people_in_db(group_id):
+    db_path = get_db_path(group_id)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # 执行查询，根据城市代码分组，并提取每个城市代码对应的所有QQ号
+    cursor.execute("SELECT city_code, GROUP_CONCAT(qq_number) FROM WeatherSubscribe GROUP BY city_code")
+    # 获取查询结果
+    results = cursor.fetchall()
+
+    # 关闭Cursor和Connection
+    cursor.close()
+
+    return results
+
+
+async def send_weather_msg(websocket,msg):
+    global bool_1, bool_2
+    while True:
+        if bool_2 == True:
+            break
+
+        if bool_1 == True:
+            bool_1 = False
+            information_total = find_people_in_db(msg.get("group_id"))
+            for city_code, qq_number in information_total:
+                #print(f"城市代码：{city_code}，对应的QQ号：{qq_number}")
+                json_data["city_code"].append(city_code)
+                qq_list = qq_number.split(',')
+                json_data["QQ_number"].append(qq_list)
+
+            num=0
+            for city_code in json_data["city_code"]:
+
+                weather_data,status,status_updata_time,windpower,temperature = await get_weather_data(city_code)
+                if weather_data == True:
+                    # 遍历字典，为每个QQ号列表生成一个拼接字符串
+                    qq_strings = []
+                    for qq_list in json_data['QQ_number']:
+                        # 使用列表推导式和join方法来构建每个QQ号字符串
+                        qq_string = ''.join([f"[CQ:at,qq={qq}]" for qq in qq_list])
+                        qq_strings.append(qq_string)
+                    content = str(qq_strings[0]) +"\n"+(""
+                                                        f"天气状况：{status}\n"
+                                                        f"更新时间：{status_updata_time}\n"
+                                                        f"风力：{windpower}\n"
+                                                        f"温度：{temperature}\n")
+                    await send_group_msg(websocket, msg.get("group_id"), content)
+                else:
+                    pass
+
+            await asyncio.sleep(900)
+
+            bool_1 = True
+            bool_2 = True
+
+            pass
+        else:
+            break
+
+
 async def get_weather_data(citycode):  # 获取天气数据
     url = f"https://www.haotechs.cn/ljh-wx/weather?adcode={citycode}"
     #print(url)
@@ -88,9 +158,47 @@ async def get_weather_data(citycode):  # 获取天气数据
             if response.status == 200:
                 data = await response.text()
                 data = json.loads(data)
-                return data
+
+                status = data["result"]["weather"]
+                status_updata_time = data["result"]["reporttime"]
+                windpower = data["result"]["windpower"]
+                temperature = data["result"]["temperature"]
+                ##print(status)
+
+                judgement_rain = get_rain_status(status)
+
+                if judgement_rain == True:
+
+
+                    return True, status, status_updata_time, windpower, temperature
+                else:
+                    return False
             else:
-                return None
+                logging.error(f"获取天气数据失败，状态码：{response.status}")
+
+def get_rain_status(status):  # 判断是否下雨
+    if "雨" in status:
+        return True
+    else:
+        return False
+
+async def dict_find_classify_citycode(target_city):  # 词典寻找城市代码
+    # 读取Excel文件
+    df = pd.read_csv('./scripts/WeatherSubscribe/citycode.csv', encoding='utf-8')
+    # 假设我们要在名为'column_name'的列中查找包含特定文字的单元格
+    # 并且我们想要获取该列后面一列的数据
+    column_name = 'name'  # 替换为你的列名
+    next_column_name = df.columns[df.columns.get_loc(column_name) + 1]  # 获取后面一列的列名
+    # 找到包含特定文字的行
+    filtered_df = df[df[column_name].str.contains(target_city, na=False)]
+    # 获取后面一列的数据
+    city_code = filtered_df[next_column_name].tolist()
+
+    if len(city_code) == 0:
+        city_code = None
+    else:
+        city_code = city_code[0]
+    return city_code
 
 
 async def handle_WeatherSubscribe_public_message(websocket,msg):
@@ -104,13 +212,24 @@ async def handle_WeatherSubscribe_public_message(websocket,msg):
     db_init(group_id)
 
     try:
+        if raw_message == "weather":
+            content = (f"[CQ:at,qq={user_id}]\n"
+                       f"使用方法：\n"
+                       f"1. 发送“sub 城市名”订阅天气信息\n"
+                       f"2. 发送“unpub”取消订阅天气信息\n"
+                       f"暂时仅支持通知下雨天气。检查频率为15min/次。\n")
+            await send_group_msg(websocket, group_id, content)
+        else:
+            pass
+
+
         if "sub" in raw_message:
             # 订阅天气
             msg_process = re.findall(r"sub (.*)", raw_message)
 
             if msg_process:
                 city_name = msg_process[0]
-                city_code = await dict_find_citycode(city_name)
+                city_code = await dict_find_classify_citycode(city_name)
 
                 if city_code == None:
                     content = f"[CQ:at,qq={user_id}] 未找到{city_name}的天气信息。"
@@ -134,30 +253,13 @@ async def handle_WeatherSubscribe_public_message(websocket,msg):
             logging.info(f"{name}({user_id})取消订阅天气信息。")
 
         else:
-            content = f"[CQ:at,qq={user_id}] 指令错误，请使用sub或unpub来进行订阅或取消订阅。"
-
-            await send_group_msg(websocket, group_id, content)
+            pass
 
     except Exception as e:
-        pass
-        # content = f"[CQ:at,qq={user_id}] 天气订阅功能出错，请检查输入是否正确。"
-        # await send_group_msg(websocket, user_id, content)
+        logging.error(f"WeatherSubscribe_Error: {e}")
 
-async def dict_find_citycode(target_city):  # 词典寻找城市代码
-    # 读取Excel文件
-    df = pd.read_csv('./scripts/WeatherSubscribe/citycode.csv', encoding='utf-8')
-    # 假设我们要在名为'column_name'的列中查找包含特定文字的单元格
-    # 并且我们想要获取该列后面一列的数据
-    column_name = 'name'  # 替换为你的列名
-    next_column_name = df.columns[df.columns.get_loc(column_name) + 1]  # 获取后面一列的列名
-    # 找到包含特定文字的行
-    filtered_df = df[df[column_name].str.contains(target_city, na=False)]
-    # 获取后面一列的数据
-    city_code = filtered_df[next_column_name].tolist()
 
-    if len(city_code) == 0:
-        city_code = None
-    else:
-        city_code = city_code[0]
-    return city_code
+async def handle_WeatherSubscribe_task(websocket,msg):
 
+    msg_task = asyncio.create_task(handle_WeatherSubscribe_public_message(websocket,msg))
+    send_msg_task = asyncio.create_task(send_weather_msg(websocket,msg))
