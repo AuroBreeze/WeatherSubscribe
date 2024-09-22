@@ -113,32 +113,35 @@ async def send_weather_msg(websocket,msg):
 
         if bool_1 == True:
             bool_1 = False
-            information_total = find_people_in_db(msg.get("group_id"))
-            for city_code, qq_number in information_total:
-                #print(f"城市代码：{city_code}，对应的QQ号：{qq_number}")
-                json_data["city_code"].append(city_code)
-                qq_list = qq_number.split(',')
-                json_data["QQ_number"].append(qq_list)
+            try:
+                information_total = find_people_in_db(msg.get("group_id"))
+                for city_code, qq_number in information_total:
+                    # print(f"城市代码：{city_code}，对应的QQ号：{qq_number}")
+                    json_data["city_code"].append(city_code)
+                    qq_list = qq_number.split(',')
+                    json_data["QQ_number"].append(qq_list)
 
-            num=0
-            for city_code in json_data["city_code"]:
+                num = 0
+                for city_code in json_data["city_code"]:
 
-                weather_data,status,status_updata_time,windpower,temperature = await get_weather_data(city_code)
-                if weather_data == True:
-                    # 遍历字典，为每个QQ号列表生成一个拼接字符串
-                    qq_strings = []
-                    for qq_list in json_data['QQ_number']:
-                        # 使用列表推导式和join方法来构建每个QQ号字符串
-                        qq_string = ''.join([f"[CQ:at,qq={qq}]" for qq in qq_list])
-                        qq_strings.append(qq_string)
-                    content = str(qq_strings[0]) +"\n"+(""
-                                                        f"天气状况：{status}\n"
-                                                        f"更新时间：{status_updata_time}\n"
-                                                        f"风力：{windpower}\n"
-                                                        f"温度：{temperature}\n")
-                    await send_group_msg(websocket, msg.get("group_id"), content)
-                else:
-                    pass
+                    weather_data, status, status_updata_time, windpower, temperature = await get_weather_data(city_code)
+                    if weather_data == True:
+                        # 遍历字典，为每个QQ号列表生成一个拼接字符串
+                        qq_strings = []
+                        for qq_list in json_data['QQ_number']:
+                            # 使用列表推导式和join方法来构建每个QQ号字符串
+                            qq_string = ''.join([f"[CQ:at,qq={qq}]" for qq in qq_list])
+                            qq_strings.append(qq_string)
+                        content = str(qq_strings[0]) + "\n" + (""
+                                                               f"天气状况：{status}\n"
+                                                               f"更新时间：{status_updata_time}\n"
+                                                               f"风力：{windpower}\n"
+                                                               f"温度：{temperature}\n")
+                        await send_group_msg(websocket, msg.get("group_id"), content)
+                    else:
+                        pass
+            except Exception as e:
+                logging.error(f"WeatherSubscribe_Error: {e}")
 
             await asyncio.sleep(900)
 
