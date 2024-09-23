@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os.path
+
 import pandas as pd
 import re
 import aiohttp
@@ -18,6 +20,11 @@ json_data={
     "QQ_number": []
 }
 
+folder_path = "./data/WeatherSubscribe"
+# 检查文件夹是否存在
+if not os.path.exists(folder_path):
+    # 如果文件夹不存在，则创建文件夹
+    os.makedirs(folder_path)
 
 # 数据存储路径，实际开发时，请将Example替换为具体的数据存放路径
 DATA_DIR = os.path.join(
