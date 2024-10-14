@@ -194,6 +194,10 @@ class Handle_WeatherSubscribe():
             if "sub" in self.raw_message:
                 # 订阅天气
                 msg_process = re.findall(r"sub (.*)", self.raw_message)
+                if msg_process == []:
+                    content = "未检查到城市名称，请检查是否添加空格。"
+                    await send_group_msg(self.websocket, self.group_id, content)
+                    return
 
                 if msg_process:
                     city_name = msg_process[0]
