@@ -188,6 +188,7 @@ class Handle_WeatherSubscribe():
                            f"2. 发送“unpub”取消订阅天气信息\n"
                            f"暂时仅支持通知下雨天气。检查频率为15min/次。\n")
                 await send_group_msg(self.websocket, self.group_id, content)
+
             else:
                 pass
 
