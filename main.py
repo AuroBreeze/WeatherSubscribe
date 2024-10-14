@@ -117,6 +117,7 @@ class DB_WeatherSubscribe:
 
 class Weather_Dectector:
     async def dict_find_classify_citycode(self, target_city):  # 词典寻找城市代码
+
         # 读取Excel文件
         df = pd.read_csv('./scripts/WeatherSubscribe/citycode.csv', encoding='utf-8')
         # 假设我们要在名为'column_name'的列中查找包含特定文字的单元格
