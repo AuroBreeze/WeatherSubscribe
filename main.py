@@ -115,6 +115,7 @@ class DB_WeatherSubscribe:
 
 class Weather_Dectector:
     async def dict_find_classify_citycode(self, target_city):  # 词典寻找城市代码
+
         # 读取Excel文件
         df = pd.read_csv('./scripts/WeatherSubscribe/citycode.csv', encoding='utf-8')
         # 假设我们要在名为'column_name'的列中查找包含特定文字的单元格
@@ -186,12 +187,17 @@ class Handle_WeatherSubscribe():
                            f"2. 发送“unpub”取消订阅天气信息\n"
                            f"暂时仅支持通知下雨天气。检查频率为15min/次。\n")
                 await send_group_msg(self.websocket, self.group_id, content)
+
             else:
                 pass
 
             if "sub" in self.raw_message:
                 # 订阅天气
                 msg_process = re.findall(r"sub (.*)", self.raw_message)
+                if msg_process == []:
+                    content = "未检查到城市名称，请检查是否添加空格。"
+                    await send_group_msg(self.websocket, self.group_id, content)
+                    return
 
                 if msg_process:
                     city_name = msg_process[0]
