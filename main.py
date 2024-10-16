@@ -5,8 +5,6 @@ import os.path
 import pandas as pd
 import re
 import aiohttp
-import sqlite3
-from datetime import datetime
 import yaml
 
 from app.api import *
@@ -162,7 +160,7 @@ class Weather_Dectector:
                     logging.error(f"获取天气数据失败，状态码：{response.status}")
 
     def get_rain_status(self,status):  # 判断是否下雨
-        if "云" in status or "雪" in status:
+        if "雨" in status or "雪" in status:
             return True
         else:
             return False
@@ -299,7 +297,7 @@ class Timer_count():
         # 获取当前分钟
         current_minute = now.minute
 
-        if current_minute % 1 ==0:
+        if current_minute % 15 ==0:
             return True
         else:
             return False
