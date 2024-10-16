@@ -217,6 +217,8 @@ class Handle_WeatherSubscribe():
 
             else:
                 pass
+            if "file" in self.raw_message or "CQ" in self.raw_message: # 过滤文件消息
+                return
 
             if "sub" in self.raw_message:
                 # 订阅天气
@@ -310,7 +312,7 @@ class Weather_Subscribe_sender:
                                                                    f"温度：{temperature}\n"
                                                                    f"城市：{city_code}\n")
                             await send_group_msg(websocket, group_id, content)
-                            print(qq_strings)
+                            #print(qq_strings)
                         else:
                             pass
 
@@ -335,7 +337,7 @@ class Timer_count():
         # 获取当前分钟
         current_minute = now.minute
 
-        if current_minute % 1 ==0:
+        if current_minute % 15 ==0:
             return True
         else:
             return False
