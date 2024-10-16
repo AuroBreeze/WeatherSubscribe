@@ -162,7 +162,7 @@ class Weather_Dectector:
                     logging.error(f"获取天气数据失败，状态码：{response.status}")
 
     def get_rain_status(self,status):  # 判断是否下雨
-        if "雨" in status or "雪" in status:
+        if "云" in status or "雪" in status:
             return True
         else:
             return False
@@ -251,26 +251,26 @@ class Weather_Subscribe_sender:
 
                 information_total = DB_WeatherSubscribe(group_id).find_people_in_db()
                 for city_code, qq_number in information_total:
-                    # print(f"城市代码：{city_code}，对应的QQ号：{qq_number}")
                     json_data["city_code"].append(city_code)
                     qq_list = qq_number.split(',')
                     json_data["QQ_number"].append(qq_list)
 
-
                 num = 0
                 for city_code in json_data["city_code"]:
 
-
                     weather_data, status, status_updata_time, windpower, temperature = await Weather_Dectector().get_weather_data(
                         city_code)
-
                     if weather_data == True:
                         # 遍历字典，为每个QQ号列表生成一个拼接字符串
                         qq_strings = []
-                        for qq_list in json_data['QQ_number']:
-                            # 使用列表推导式和join方法来构建每个QQ号字符串
-                            qq_string = ''.join([f"[CQ:at,qq={qq}]" for qq in qq_list])
-                            qq_strings.append(qq_string)
+
+                        qq_list = json_data['QQ_number'][num]
+                        num += 1
+
+                        # 使用列表推导式和join方法来构建每个QQ号字符串
+                        qq_string = ''.join([f"[CQ:at,qq={qq}]" for qq in qq_list])
+                        qq_strings.append(qq_string)
+
                         content = str(qq_strings[0]) + "\n" + (""
                                                                f"天气状况：{status}\n"
                                                                f"更新时间：{status_updata_time}\n"
@@ -299,7 +299,7 @@ class Timer_count():
         # 获取当前分钟
         current_minute = now.minute
 
-        if current_minute % 15 ==0:
+        if current_minute % 1 ==0:
             return True
         else:
             return False
