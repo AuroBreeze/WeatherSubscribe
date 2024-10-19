@@ -6,6 +6,8 @@ import pandas as pd
 import re
 import aiohttp
 import yaml
+import time
+import datetime
 
 from app.api import *
 from app.switch import load_switch, save_switch
@@ -13,9 +15,13 @@ from app.config import *
 
 
 list_group_id = []
-json_data={"city_code": [],"QQ_number": []}
+json_data = {"city_code": [], "QQ_number": [], "weather_condition": [], "query_time": []}
 
-bool_onoff = True
+used_list_qqnumber = []
+
+bool_onoff = False
+
+
 # 查看功能开关状态
 def load_WeatherSubscribe_status(group_id):
     return load_switch(group_id, "WeatherSubscribe_status")
@@ -51,11 +57,13 @@ class DB_WeatherSubscribe:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        # 创建一个表
+        # 创建一个表，包含新字段：weather_condition 和 query_time
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS WeatherSubscribe (
             qq_number TEXT PRIMARY KEY,
-            city_code TEXT NOT NULL
+            city_code TEXT NOT NULL,
+            weather_condition TEXT,
+            query_time TEXT
         )
         ''')
 
@@ -66,14 +74,27 @@ class DB_WeatherSubscribe:
         # 关闭Connection
         conn.close()
 
-    def insert_people_to_db(self, user_id, city_code):
-        people_data = [(user_id, city_code)]
+    def insert_weather_info(self, user_id, city_code):
         db_path = self.get_db_path()
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
+        # 如果没有提供天气情况和查询时间，则查询相同城市代码的最后一条记录的值
+
+        last_info = self.get_last_weather_info(city_code)
+
+        if last_info:
+            weather_condition, query_time = last_info
+
+        else:
+            weather_condition = "晴"
+            query_time =data = time.strftime("%Y-%m-%d", time.localtime())
+
+
+
         # 插入数据
-        cursor.executemany("INSERT OR REPLACE INTO WeatherSubscribe (qq_number,city_code) VALUES (?,?)", people_data)
+        cursor.execute("INSERT OR REPLACE INTO WeatherSubscribe (qq_number, city_code, weather_condition, query_time) VALUES (?, ?, ?, ?)",
+                       (user_id, city_code, weather_condition, query_time))
 
         # 提交事务
         conn.commit()
@@ -81,7 +102,6 @@ class DB_WeatherSubscribe:
         cursor.close()
         # 关闭Connection
         conn.close()
-
     def delete_people_from_db(self, user_id):
         db_path = self.get_db_path()
         conn = sqlite3.connect(db_path)
@@ -97,18 +117,48 @@ class DB_WeatherSubscribe:
         # 关闭Connection
         conn.close()
 
+    def update_weather_info(self,weather_condition, query_time,qq_number):
+        db_path = self.get_db_path()
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # 执行更新操作
+        cursor.execute("UPDATE WeatherSubscribe SET weather_condition = ?, query_time = ? WHERE qq_number = ?", (weather_condition, query_time, qq_number))
+        # 提交事务
+        conn.commit()
+        # 关闭Cursor
+        cursor.close()
+        # 关闭Connection
+        conn.close()
+
+    def get_last_weather_info(self, city_code):
+        db_path = self.get_db_path()
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # 查询相同城市代码的最后一条记录的天气情况和查询时间
+        cursor.execute("SELECT weather_condition, query_time FROM WeatherSubscribe WHERE city_code = ? ORDER BY qq_number DESC LIMIT 1", (city_code,))
+        last_weather_info = cursor.fetchone()
+
+        # 关闭Cursor和Connection
+        cursor.close()
+        conn.close()
+
+        return last_weather_info
+
     def find_people_in_db(self):
         db_path = self.get_db_path()
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
         # 执行查询，根据城市代码分组，并提取每个城市代码对应的所有QQ号
-        cursor.execute("SELECT city_code, GROUP_CONCAT(qq_number) FROM WeatherSubscribe GROUP BY city_code")
+        cursor.execute("SELECT city_code, GROUP_CONCAT(qq_number), GROUP_CONCAT(weather_condition), GROUP_CONCAT(query_time) FROM WeatherSubscribe GROUP BY city_code")
         # 获取查询结果
         results = cursor.fetchall()
 
         # 关闭Cursor和Connection
         cursor.close()
+        conn.close()
 
         return results
 
@@ -136,6 +186,8 @@ class Weather_Dectector:
         return city_code
 
     async def get_weather_data(self, citycode=370881):  # 获取天气数据
+
+
         key  = yaml.load(open("./scripts/WeatherSubscribe/config.yml", "r"), Loader=yaml.FullLoader)["WeatherAPI_KEY"]
         url = "https://restapi.amap.com/v3/weather/weatherInfo?key="+str(key)+f"&city={str(citycode)}&extensions=base&output=json"
         # print(url)
@@ -158,15 +210,13 @@ class Weather_Dectector:
 
                         return True, status, status_updata_time, windpower, temperature
                     else:
-                        return False
+                        return False,status,status_updata_time,windpower,temperature
                 else:
                     logging.error(f"获取天气数据失败，状态码：{response.status}")
 
     def get_rain_status(self,status):  # 判断是否下雨
-        if "晴" in status or "雪" in status:
+        if "雨" in status or "雪" in status:
             return True
-        else:
-            return False
 
 #-----------------------------------------------------------------------------------------------------------------------
 class Handle_WeatherSubscribe():
@@ -239,7 +289,7 @@ class Handle_WeatherSubscribe():
                     else:
                         content = f"[CQ:at,qq={self.user_id}] 已订阅{city_name}的天气信息。"
 
-                        DB_WeatherSubscribe(self.group_id).insert_people_to_db(self.user_id, city_code)
+                        DB_WeatherSubscribe(self.group_id).insert_weather_info(self.user_id, city_code)
                         await send_group_msg(self.websocket, self.group_id, content)
 
                         logging.info(f"{self.name}({self.user_id})订阅{city_name}的天气信息。")
@@ -256,11 +306,8 @@ class Handle_WeatherSubscribe():
 
             else:
                 pass
-#[('370881', '1732373074,2769731875,1010332940,1500463997,3567491896,2895653968'), ('513334', '3758125967'), ('810000', '3051608572')]
-
         except Exception as e:
-            logging.error(f"WeatherSubscribe_Error: {e}")
-
+            logging.error(f"WeatherSubscribe_Error(Handle_WeatherSubscribe): {e}")
 
 class Weather_Subscribe_sender:
     global list_group_id,json_data
@@ -277,16 +324,19 @@ class Weather_Subscribe_sender:
                     else:
                         logging.info(f"File: {filename} does not contain a valid group ID")
         except Exception as e:
-            logging.error(f"WeatherSubscribe_Error: {e}")
+            logging.error(f"WeatherSubscribe_Error(Weather_Subscribe_sender.add_group_id): {e}")
 
 
     async def send_weather_msg(self, websocket):
+        data = time.strftime("%Y-%m-%d", time.localtime())# 获得当前日期,并格式化为ISO格式
 
         try:
+            #print(list_group_id)
             for group_id in list_group_id:
                 information_total = DB_WeatherSubscribe(group_id).find_people_in_db()
+                #print(information_total)
                 if information_total != []:  # 确保信息不为空
-                    for city_code, qq_number in information_total:
+                    for city_code, qq_number, weather_condition, query_time in information_total:
                         json_data["city_code"].append(city_code)
                         qq_list = qq_number.split(',')
                         json_data["QQ_number"].append(qq_list)
@@ -296,30 +346,55 @@ class Weather_Subscribe_sender:
 
                         weather_data, status, status_updata_time, windpower, temperature = await Weather_Dectector().get_weather_data(
                             city_code)
+                        #print(status)
                         if weather_data == True:
+                            print(weather_data)
                             # 遍历字典，为每个QQ号列表生成一个拼接字符串
-                            qq_strings = []
-                            qq_list = json_data['QQ_number'][num]
-                            num += 1
-                            # 使用列表推导式和join方法来构建每个QQ号字符串
-                            qq_string = ''.join([f"[CQ:at,qq={qq}]" for qq in qq_list])
-                            qq_strings.append(qq_string)
+                            num_list = DB_WeatherSubscribe(group_id).get_last_weather_info(city_code)
+                            print(num_list)
 
-                            content = str(qq_strings[0]) + "\n" + (""
+                            if num_list[0] != "雨雪" or num_list[1] != data:
+                                # 构建QQ号字符串列表
+                                qq_strings = []
+                                qq_list = json_data['QQ_number'][num]
+                                #print(qq_list)
+
+                                num += 1
+
+                                # 使用列表推导式和join方法来构建每个QQ号字符串
+                                qq_string = ''.join([f"[CQ:at,qq={qq}]" for qq in qq_list])
+
+
+                                # 遍历查询到的天气信息，为每个QQ号添加天气信息
+
+                                for qq in qq_list:
+                                   DB_WeatherSubscribe(group_id).update_weather_info(weather_condition='雨雪',
+                                                                                      query_time=data,
+                                                                                      qq_number=qq)
+                                qq_strings.append(qq_string)
+
+                                content = str(qq_strings[0]) + "\n" + (""
                                                                    f"天气状况：{status}\n"
                                                                    f"更新时间：{status_updata_time}\n"
                                                                    f"风力：{windpower}\n"
                                                                    f"温度：{temperature}\n"
                                                                    f"城市：{city_code}\n")
-                            await send_group_msg(websocket, group_id, content)
-                            #print(qq_strings)
+                                await send_group_msg(websocket, group_id, content)
+
                         else:
+                            qq_list = json_data['QQ_number'][num]
+                            for qq in qq_list:
+                                DB_WeatherSubscribe(group_id).update_weather_info(weather_condition=status,
+                                                                                   query_time=status_updata_time,
+                                                                                   qq_number=qq)
+                                print(f"更新{qq}的天气信息,天气状况:{status},更新时间:{status_updata_time}")
+                            num += 1
                             pass
 
 
 
         except Exception as e:
-            logging.error(f"WeatherSubscribe_Error: {e}")
+            logging.error(f"WeatherSubscribe_Error(Weather_Subscribe_sender.send_weather_msg): {e}")
 
         list_group_id.clear()
         json_data["QQ_number"].clear()  # 清空QQ号列表
