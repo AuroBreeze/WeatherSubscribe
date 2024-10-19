@@ -80,18 +80,13 @@ class DB_WeatherSubscribe:
         cursor = conn.cursor()
 
         # 如果没有提供天气情况和查询时间，则查询相同城市代码的最后一条记录的值
-
         last_info = self.get_last_weather_info(city_code)
 
         if last_info:
             weather_condition, query_time = last_info
-
         else:
             weather_condition = "晴"
             query_time = time.strftime("%Y-%m-%d", time.localtime())
-
-
-
         # 插入数据
         cursor.execute("INSERT OR REPLACE INTO WeatherSubscribe (qq_number, city_code, weather_condition, query_time) VALUES (?, ?, ?, ?)",
                        (user_id, city_code, weather_condition, query_time))
@@ -202,15 +197,22 @@ class Weather_Dectector:
                     status_updata_time = data["lives"][0]["reporttime"]
                     windpower = data["lives"][0]["windpower"]
                     temperature = data["lives"][0]["temperature"]
-                    ##print(status)
 
-                    judgement_rain =self.get_rain_status(status)
+                    json_data_weather ={
+                        "city_code": citycode,
+                        "status": status,
+                        "status_updata_time": status_updata_time,
+                        "windpower": windpower,
+                        "temperature": temperature
+                    }
+
+                    judgement_rain =self.get_rain_status(json_data_weather["status"])
 
                     if judgement_rain == True:
 
-                        return True, status, status_updata_time, windpower, temperature
+                        return True,json_data_weather
                     else:
-                        return False,status,status_updata_time,windpower,temperature
+                        return False,json_data_weather
                 else:
                     logging.error(f"获取天气数据失败，状态码：{response.status}")
 
@@ -261,10 +263,7 @@ class Handle_WeatherSubscribe():
 
 
             if bool_onoff == False: # 判断功能开关是否开启
-                # content = "WeatherSubscribe功能未启用，请联系管理员。"
-                # await send_group_msg(self.websocket, self.group_id, content)
                 return
-
             if "file" in self.raw_message or "CQ" in self.raw_message: # 过滤文件消息
                 return
 
@@ -318,7 +317,7 @@ class Weather_Subscribe_sender:
                     if len(parts) > 1:
                         group_id = parts[0]
                         list_group_id.append(group_id)
-                        logging.info(f"File: {filename}, Group ID: {group_id}")
+                       # logging.info(f"File: {filename}, Group ID: {group_id}")
                     else:
                         logging.info(f"File: {filename} does not contain a valid group ID")
         except Exception as e:
@@ -326,65 +325,62 @@ class Weather_Subscribe_sender:
 
 
     async def send_weather_msg(self, websocket):
-        data = time.strftime("%Y-%m-%d", time.localtime())# 获得当前日期,并格式化为ISO格式
+        data = time.strftime("%Y-%m-%d", time.localtime())
 
         try:
             #print(list_group_id)
             for group_id in list_group_id:
                 information_total = DB_WeatherSubscribe(group_id).find_people_in_db()
-                if information_total != []:  # 确保信息不为空
-                    for city_code, qq_number, weather_condition, query_time in information_total:
-                        json_data["city_code"].append(city_code)
-                        qq_list = qq_number.split(',')
-                        json_data["QQ_number"].append(qq_list)
+                if information_total == []:  # 确保信息不为空
+                    continue
+                for city_code, qq_number, weather_condition, query_time in information_total:
+                    json_data["city_code"].append(city_code)
+                    qq_list = qq_number.split(',')
+                    json_data["QQ_number"].append(qq_list)
 
-                    num = 0
-                    for city_code in json_data["city_code"]:
+                num = 0
+                for city_code in json_data["city_code"]:
+                    judgement_rain, json_data_weather = await Weather_Dectector().get_weather_data(city_code) # 获取天气数据
 
-                        weather_data, status, status_updata_time, windpower, temperature = await Weather_Dectector().get_weather_data(
-                            city_code)
-                        #print(status)
-                        if weather_data == True:
-                            # 遍历字典，为每个QQ号列表生成一个拼接字符串
-                            num_list = DB_WeatherSubscribe(group_id).get_last_weather_info(city_code)
-                            #print(num_list)
+                    if judgement_rain == True:
+                        # 遍历字典，为每个QQ号列表生成一个拼接字符串
+                        num_list = DB_WeatherSubscribe(group_id).get_last_weather_info(city_code)
 
-                            if num_list[0] != "雨雪" or num_list[1] != data:
-                                # 构建QQ号字符串列表
-                                qq_strings = []
-                                qq_list = json_data['QQ_number'][num]
-                                #print(qq_list)
+                        if num_list[0] != "雨雪" or num_list[1] != data:
 
-                                num += 1
+                            qq_strings = []  # 构建QQ号字符串列表
+                            qq_list = json_data['QQ_number'][num]  # 获取QQ号列表
 
-                                # 使用列表推导式和join方法来构建每个QQ号字符串
-                                qq_string = ''.join([f"[CQ:at,qq={qq}]" for qq in qq_list])
-
-
-                                # 遍历查询到的天气信息，为每个QQ号添加天气信息
-
-                                for qq in qq_list:
-                                   DB_WeatherSubscribe(group_id).update_weather_info(weather_condition='雨雪',
-                                                                                      query_time=data,
-                                                                                      qq_number=qq)
-                                qq_strings.append(qq_string)
-
-                                content = str(qq_strings[0]) + "\n" + (""
-                                                                   f"天气状况：{status}\n"
-                                                                   f"更新时间：{status_updata_time}\n"
-                                                                   f"风力：{windpower}\n"
-                                                                   f"温度：{temperature}\n"
-                                                                   f"城市：{city_code}\n")
-                                await send_group_msg(websocket, group_id, content)
-
-                        else:
-                            qq_list = json_data['QQ_number'][num]
-                            for qq in qq_list:
-                                DB_WeatherSubscribe(group_id).update_weather_info(weather_condition=status,
-                                                                                   query_time=data,
-                                                                                   qq_number=qq)
                             num += 1
-                            pass
+
+                            # 使用列表推导式和join方法来构建每个QQ号字符串
+                            qq_string = ''.join([f"[CQ:at,qq={qq}]" for qq in qq_list])
+
+                            # 遍历查询到的天气信息，为每个QQ号添加天气信息
+                            for qq in qq_list:
+                                DB_WeatherSubscribe(group_id).update_weather_info(weather_condition='雨雪',
+                                                                                  query_time=data,
+                                                                                  qq_number=qq)
+                            qq_strings.append(qq_string)
+
+                            content = str(qq_strings[0]) + "\n" + (""
+                                                                   f"天气状况：{json_data_weather['status']}\n"
+                                                                   f"更新时间：{json_data_weather['status_updata_time']}\n"
+                                                                   f"风力：{json_data_weather['windpower']}\n"
+                                                                   f"温度：{json_data_weather['temperature']}\n"
+                                                                   f"城市：{city_code}\n")
+                            await send_group_msg(websocket, group_id, content)
+
+                    else:
+                        qq_list = json_data['QQ_number'][num]
+                        for qq in qq_list:
+                            DB_WeatherSubscribe(group_id).update_weather_info(
+                                weather_condition=json_data_weather['status'],
+                                query_time=data,
+                                qq_number=qq)
+                        num += 1
+                        pass
+
 
 
 
@@ -399,7 +395,7 @@ class Weather_Subscribe_sender:
         await self.add_group_id()
         await self.send_weather_msg(websocket)
 
-class Timer_count():
+class Timer_count():  # 定时任务
 
     def timer_count(self):
         now = datetime.now()
@@ -411,7 +407,7 @@ class Timer_count():
             return True
         else:
             return False
-    async def handle_WeatherSubscribe_task_main(self, websocket):
+    async def handle_WeatherSubscribe_task_main(self, websocket):  # 定时任务
         global bool_onoff
         if bool_onoff == False:
             return
