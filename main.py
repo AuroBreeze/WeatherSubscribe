@@ -264,15 +264,13 @@ class db_judgement:
         # 关闭Connection
         conn.close()
 
-    async def judgement(self, group_id,websocket):
+    def judgement(self, group_id):
         # 判断功能开关
         init_group_id = self.get_judgement(group_id)
         if init_group_id == None:
 
             self.insert_judgement(group_id, "off")
             content = "天气订阅功能已设置成默认关闭状态。"
-            await send_group_msg(websocket,group_id,content)
-
             return False
 
         if init_group_id == "on":
@@ -305,6 +303,7 @@ class Weather_Dectector:
 
     async def get_weather_data(self, citycode=370881):  # 获取天气数据
 
+
         key = yaml.load(
             open("./scripts/WeatherSubscribe/config.yml", "r"), Loader=yaml.FullLoader
         )["WeatherAPI_KEY"]
@@ -313,7 +312,7 @@ class Weather_Dectector:
             + str(key)
             + f"&city={str(citycode)}&extensions=base&output=json"
         )
-        # print(url)
+        #print(url)
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status == 200:
@@ -324,9 +323,10 @@ class Weather_Dectector:
                     status_updata_time = data["lives"][0]["reporttime"]
                     windpower = data["lives"][0]["windpower"]
                     temperature = data["lives"][0]["temperature"]
-                    ##print(status)
+
 
                     judgement_rain = self.get_rain_status(status)
+
 
                     if judgement_rain == True:
 
@@ -394,7 +394,7 @@ class Handle_WeatherSubscribe:
                     return
 
                 # 判断功能开关
-                judgement =await db_judgement().judgement(self.group_id,self.websocket)
+                judgement = db_judgement().judgement(self.group_id)
                 if judgement == False:  # 判断功能开关是否开启
                     content = "WeatherSubscribe功能未启用，请联系管理员。"
                     await send_group_msg(self.websocket, self.group_id, content)
@@ -469,68 +469,71 @@ class Weather_Subscribe_sender:
                 f"WeatherSubscribe_Error(Weather_Subscribe_sender.add_group_id): {e}"
             )
 
-    async def send_weather_msg(self, websocket):
+
+    async def send_weather_msg(self, websocket,number_qq):
         data = time.strftime(
             "%Y-%m-%d", time.localtime()
         )  # 获得当前日期,并格式化为ISO格式
 
         try:
             # print(list_group_id)
-            for group_id in list_group_id:
-                information_total = DB_WeatherSubscribe(group_id).find_people_in_db()
-                if information_total != []:  # 确保信息不为空
-                    for (
+            #for group_id in list_group_id:
+            group_id = number_qq
+            information_total = DB_WeatherSubscribe(group_id).find_people_in_db()
+            # print(information_total)
+            if information_total != []:  # 确保信息不为空
+                for (
                         city_code,
                         qq_number,
                         weather_condition,
                         query_time,
-                    ) in information_total:
-                        json_data["city_code"].append(city_code)
-                        qq_list = qq_number.split(",")
-                        json_data["QQ_number"].append(qq_list)
+                ) in information_total:
+                    json_data["city_code"].append(city_code)
+                    qq_list = qq_number.split(",")
+                    json_data["QQ_number"].append(qq_list)
 
-                    num = 0
-                    for city_code in json_data["city_code"]:
+                num = 0
+                for city_code in json_data["city_code"]:
+                    # print(city_code)
+                    (
+                        weather_data,
+                        status,
+                        status_updata_time,
+                        windpower,
+                        temperature,
+                    ) = await Weather_Dectector().get_weather_data(city_code)
 
-                        (
-                            weather_data,
-                            status,
-                            status_updata_time,
-                            windpower,
-                            temperature,
-                        ) = await Weather_Dectector().get_weather_data(city_code)
-                        # print(status)
-                        if weather_data == True:
-                            # 遍历字典，为每个QQ号列表生成一个拼接字符串
-                            num_list = DB_WeatherSubscribe(
-                                group_id
-                            ).get_last_weather_info(city_code)
-                            # print(num_list)
+                    if weather_data == True:
+                        # 遍历字典，为每个QQ号列表生成一个拼接字符串
+                        num_list = DB_WeatherSubscribe(
+                            group_id
+                        ).get_last_weather_info(city_code)
+                        # print(num_list)
 
-                            if num_list[0] != "雨雪" or num_list[1] != data:
-                                # 构建QQ号字符串列表
-                                qq_strings = []
-                                qq_list = json_data["QQ_number"][num]
-                                # print(qq_list)
+                        if num_list[0] != "雨雪" or num_list[1] != data:
+                            # 构建QQ号字符串列表
+                            qq_strings = []
+                            qq_list = json_data["QQ_number"][num]
+                            # print(qq_list)
 
-                                num += 1
+                            num += 1
 
-                                # 使用列表推导式和join方法来构建每个QQ号字符串
-                                qq_string = "".join(
-                                    [f"[CQ:at,qq={qq}]" for qq in qq_list]
+                            # 使用列表推导式和join方法来构建每个QQ号字符串
+                            qq_string = "".join(
+                                [f"[CQ:at,qq={qq}]" for qq in qq_list]
+                            )
+
+                            # 遍历查询到的天气信息，为每个QQ号添加天气信息
+
+                            for qq in qq_list:
+                                DB_WeatherSubscribe(group_id).update_weather_info(
+                                    weather_condition="雨雪",
+                                    query_time=data,
+                                    qq_number=qq,
                                 )
+                            qq_strings.append(qq_string)
 
-                                # 遍历查询到的天气信息，为每个QQ号添加天气信息
-
-                                for qq in qq_list:
-                                    DB_WeatherSubscribe(group_id).update_weather_info(
-                                        weather_condition="雨雪",
-                                        query_time=data,
-                                        qq_number=qq,
-                                    )
-                                qq_strings.append(qq_string)
-
-                                content = (
+                            content = (
                                     str(qq_strings[0])
                                     + "\n"
                                     + (
@@ -542,19 +545,20 @@ class Weather_Subscribe_sender:
                                         f"城市：{city_code}\n"
                                         f"技术支持：https://aurobreeze.top/about/"
                                     )
-                                )
-                                await send_group_msg(websocket, group_id, content)
+                            )
+                            await send_group_msg(websocket, group_id, content)
+                            # print(1)
 
-                        else:
-                            qq_list = json_data["QQ_number"][num]
-                            for qq in qq_list:
-                                DB_WeatherSubscribe(group_id).update_weather_info(
-                                    weather_condition=status,
-                                    query_time=data,
-                                    qq_number=qq,
-                                )
-                            num += 1
-                            pass
+                    else:
+                        qq_list = json_data["QQ_number"][num]
+                        for qq in qq_list:
+                            DB_WeatherSubscribe(group_id).update_weather_info(
+                                weather_condition=status,
+                                query_time=data,
+                                qq_number=qq,
+                            )
+                        num += 1
+                        pass
 
         except Exception as e:
             logging.error(
@@ -565,10 +569,10 @@ class Weather_Subscribe_sender:
         json_data["QQ_number"].clear()  # 清空QQ号列表
         json_data["city_code"].clear()  # 清空城市代码列表
 
-    async def handle_WeatherSubscribe_task_Start(self, websocket):
-        await self.add_group_id()
-        await self.send_weather_msg(websocket)
-
+    # async def handle_WeatherSubscribe_task_Start(self, websocket):
+    #     await self.add_group_id()
+    #     await self.send_weather_msg(websocket)
+    #
 
 class Timer_count:
 
@@ -584,20 +588,22 @@ class Timer_count:
             return False
 
     async def handle_WeatherSubscribe_task_main(self, websocket):
-        global bool_onoff
-        if bool_onoff == False:
-            return
-        bool = self.timer_count()
-        if bool == False:
-            return
-        await Weather_Subscribe_sender().add_group_id()
-        task_sender = asyncio.create_task(
-            Weather_Subscribe_sender().send_weather_msg(websocket)
-        )
 
+        await Weather_Subscribe_sender().add_group_id()
+        list_num = list_group_id[:-1]
+        for number_qq in list_num: # 删除最后的判断的表
+            #print(number_qq)
+            judgement = db_judgement().judgement(number_qq)
+            if judgement == True:
+                task_sender = await asyncio.create_task(
+                    Weather_Subscribe_sender().send_weather_msg(websocket, number_qq)
+                )
+            else:
+                pass
+        list_group_id.clear()
 
 async def handle_WeatherSubscribe_task_Msg(websocket, msg):
-    msg_task = asyncio.create_task(
+    msg_task = await asyncio.create_task(
         Handle_WeatherSubscribe(websocket, msg).handle_WeatherSubscribe_public_message()
     )
 
