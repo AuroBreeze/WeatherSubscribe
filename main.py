@@ -438,6 +438,7 @@ class Weather_Subscribe_sender:
                                         f"风力：{windpower}\n"
                                         f"温度：{temperature}\n"
                                         f"城市：{city_code}\n"
+                                        f"技术支持：https://aurobreeze.top/about/"
                                     )
                                 )
                                 await send_group_msg(websocket, group_id, content)
