@@ -285,16 +285,17 @@ class Handle_WeatherSubscribe:
                     f"3. 发送“subon”启用天气订阅功能(admine)\n"
                     f"4. 发送“suboff”禁用天气订阅功能(admine)\n"
                     f"暂时仅支持通知下雨天气。检查频率为15min/次。\n"
+                    f"技术支持：https://aurobreeze.top/about/"
                 )
                 await send_group_msg(self.websocket, self.group_id, content)
 
-            if bool_onoff == False:  # 判断功能开关是否开启
-                # content = "WeatherSubscribe功能未启用，请联系管理员。"
-                # await send_group_msg(self.websocket, self.group_id, content)
-                return
-
             if "file" in self.raw_message or "CQ" in self.raw_message:  # 过滤文件消息
                 return
+
+            if bool_onoff == False:  # 判断功能开关是否开启
+                content = "WeatherSubscribe功能未启用，请联系管理员。"
+                await send_group_msg(self.websocket, self.group_id, content)
+
 
             if "sub" in self.raw_message and self.raw_message.startswith("sub"):
                 # 订阅天气
