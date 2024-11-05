@@ -289,15 +289,17 @@ class Handle_WeatherSubscribe:
                 )
                 await send_group_msg(self.websocket, self.group_id, content)
 
-            if "file" in self.raw_message or "CQ" in self.raw_message:  # 过滤文件消息
-                return
-
-            if bool_onoff == False:  # 判断功能开关是否开启
-                content = "WeatherSubscribe功能未启用，请联系管理员。"
-                await send_group_msg(self.websocket, self.group_id, content)
-
 
             if "sub" in self.raw_message and self.raw_message.startswith("sub"):
+
+                if "file" in self.raw_message or "CQ" in self.raw_message:  # 过滤文件消息
+                    return
+
+                if bool_onoff == False:  # 判断功能开关是否开启
+                    content = "WeatherSubscribe功能未启用，请联系管理员。"
+                    await send_group_msg(self.websocket, self.group_id, content)
+                    return
+
                 # 订阅天气
                 msg_process = re.findall(r"sub (.*)", self.raw_message)
                 if msg_process == []:
