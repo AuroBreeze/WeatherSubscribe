@@ -24,9 +24,6 @@ json_data = {
 
 used_list_qqnumber = []
 
-bool_onoff = False
-
-
 # 查看功能开关状态
 def load_WeatherSubscribe_status(group_id):
     return load_switch(group_id, "WeatherSubscribe_status")
@@ -186,6 +183,104 @@ class DB_WeatherSubscribe:
 # ----------------------------------------------------------------------------------------------------------------------
 
 
+class db_judgement:
+    def get_db_path(self):
+        return os.path.join(
+            os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            ),
+            "data",
+            "WeatherSubscribe",
+            f"judgement_WeatherSubscribe.db",
+        )
+
+
+    def db_init(self):
+        # 初始化数据库
+        db_path = self.get_db_path()
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # 创建一个表，包含新字段：weather_condition 和 query_time
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS WeatherSubscribe (
+            group_id INTEGER PRIMARY KEY,
+            judgment TEXT
+        )
+        """
+        )
+
+        # 提交事务
+        conn.commit()
+        # 关闭Cursor
+        cursor.close()
+        # 关闭Connection
+        conn.close()
+
+    def insert_judgement(self, group_id, judgment):
+        # 插入数据
+        db_path = self.get_db_path()
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "INSERT OR REPLACE INTO WeatherSubscribe (group_id, judgment) VALUES (?, ?)",
+            (group_id, judgment),
+        )
+
+        # 提交事务
+        conn.commit()
+        # 关闭Cursor
+        cursor.close()
+        # 关闭Connection
+        conn.close()
+
+    def get_judgement(self, group_id):
+        # 查询数据
+        db_path = self.get_db_path()
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT judgment FROM WeatherSubscribe WHERE group_id = ?", (group_id,))
+        result = cursor.fetchone()
+        # 关闭Cursor和Connection
+        cursor.close()
+        conn.close()
+        if result:
+            return result[0]
+        else:
+            return None
+
+    def delete_judgement(self, group_id):
+        # 删除数据
+        db_path = self.get_db_path()
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM WeatherSubscribe WHERE group_id = ?", (group_id,))
+        # 提交事务
+        conn.commit()
+        # 关闭Cursor
+        cursor.close()
+        # 关闭Connection
+        conn.close()
+
+    async def judgement(self, group_id,websocket):
+        # 判断功能开关
+        init_group_id = self.get_judgement(group_id)
+        if init_group_id == None:
+
+            self.insert_judgement(group_id, "off")
+            content = "天气订阅功能已设置成默认关闭状态。"
+            await send_group_msg(websocket,group_id,content)
+
+            return False
+
+        if init_group_id == "on":
+            return True
+        else:
+            return False
+
+# ----------------------------------------------------------------------------------------------------------------------
 class Weather_Dectector:
     async def dict_find_classify_citycode(self, target_city):  # 词典寻找城市代码
 
@@ -260,23 +355,26 @@ class Handle_WeatherSubscribe:
         global bool_onoff
         # 初始化数据库
         DB_WeatherSubscribe(self.group_id).db_init()
+        db_judgement().db_init()
 
         try:
             if is_authorized(self.role, self.user_id):  # 判断是否为管理员
-                if self.raw_message == "subon":
-                    bool_onoff = True
+                if self.raw_message == "subon" and self.raw_message.startswith("subon"):
+                    db_judgement().insert_judgement(self.group_id, "on")
                     content = "天气订阅功能已启用。"
                     await send_group_msg(self.websocket, self.group_id, content)
-                elif self.raw_message == "suboff":
-                    bool_onoff = False
+
+                    return
+                elif self.raw_message == "suboff" and self.raw_message.startswith("suboff"):
+                    db_judgement().insert_judgement(self.group_id, "off")
                     content = "天气订阅功能已禁用。"
                     await send_group_msg(self.websocket, self.group_id, content)
-                else:
-                    pass
-            if "subon" == self.raw_message or "suboff" == self.raw_message:
-                return  # 管理员命令不进行处理
 
-            if self.raw_message == "weather":
+                    return
+                elif self.raw_message == "offf" and self.raw_message.startswith("offf") :
+                    pass
+
+            if self.raw_message == "weather" and self.raw_message.startswith("weather"):
                 content = (
                     f"[CQ:at,qq={self.user_id}]\n"
                     f"使用方法：\n"
@@ -295,7 +393,9 @@ class Handle_WeatherSubscribe:
                 if "file" in self.raw_message or "CQ" in self.raw_message:  # 过滤文件消息
                     return
 
-                if bool_onoff == False:  # 判断功能开关是否开启
+                # 判断功能开关
+                judgement =await db_judgement().judgement(self.group_id,self.websocket)
+                if judgement == False:  # 判断功能开关是否开启
                     content = "WeatherSubscribe功能未启用，请联系管理员。"
                     await send_group_msg(self.websocket, self.group_id, content)
                     return
